@@ -24,10 +24,10 @@ main :: proc() {
 		fmt.eprintln("Failed to get terminal size")
 		os.exit(1)
 	}
-	l := log_init(false)
+	l := log_init(true)
 	defer log_close(&l)
 
-	cells, screen_dm := read_file_by_lines("simple.txt")
+	cells, screen_dm := read_file_by_lines("logo.txt", &l)
 	screen_dm.width = term_dm.width
 	size := screen_dm.width * screen_dm.height
 
@@ -133,7 +133,7 @@ render :: proc(frame: []rune, dm: Dimensions) {
 	fmt.print(strings.to_string(builder))
 }
 
-read_file_by_lines :: proc(filepath: string) -> (Cells, Dimensions) {
+read_file_by_lines :: proc(filepath: string, l: ^Logger) -> (Cells, Dimensions) {
 	data, ok := os.read_entire_file(filepath, context.allocator)
 	if !ok {
 		fmt.panicf("Failed to read file: %s", filepath)
@@ -152,8 +152,8 @@ read_file_by_lines :: proc(filepath: string) -> (Cells, Dimensions) {
 		col: i32 = 0
 
 		for r in line {
-			if !is_braille(r) && r != ' ' {
-				col += 1
+			if !is_braille(r) && r != ' ' && r != Base {
+				msg(l, fmt.tprintf("Non-braille/space rune: %#v (U+%04X)\n", r, r))
 				continue
 			}
 			w += 1
