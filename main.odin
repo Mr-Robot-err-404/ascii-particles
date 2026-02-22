@@ -3,6 +3,7 @@ package main
 import "core:fmt"
 import "core:os"
 import "core:strings"
+import "core:time"
 
 
 Pos :: struct {
@@ -14,9 +15,13 @@ Dimensions :: struct {
 	height: i32,
 }
 Cells :: map[Pos]rune
+Targets :: map[Pos]Pos
+Points :: map[Pos]bool
 
 Base: rune = '\U00002800'
 Full: rune = '\U000028FF'
+
+FPS: i64 = 60
 
 main :: proc() {
 	term_dm, ok := dimensions()
@@ -32,20 +37,77 @@ main :: proc() {
 	size := screen_dm.width * screen_dm.height
 
 	frame := make([]rune, size)
-	fill(&frame)
+
+	set_cursor(false)
+	defer set_cursor(true)
 
 	dm := Dimensions {
 		width  = screen_dm.width * 2,
 		height = screen_dm.height * 4,
 	}
 	bitmap, braille := get_bitmap()
-	points := make(map[Pos]bool)
+	points := make(Points)
 
 	cells_to_points(cells, bitmap, &points)
-	points_to_cells(points, &cells, braille)
+	targets := make_targets(points)
 
+	points_to_cells(points, &cells, braille)
 	cells_to_frame(cells, &frame, screen_dm.width)
-	render(frame, screen_dm)
+	render(frame, screen_dm, true)
+
+	c := 0
+	interval := time.Second / time.Duration(FPS)
+
+	for c < 40 {
+		defer c += 1
+		clear_cells(&cells)
+		clear_points(&points)
+		fill(&frame)
+
+		move(&targets, &points)
+		points_to_cells(points, &cells, braille)
+		cells_to_frame(cells, &frame, screen_dm.width)
+
+		render(frame, screen_dm, false)
+		time.sleep(interval)
+	}
+}
+
+move :: proc(t: ^Targets, points: ^Points) {
+	for target, pos in t {
+		x := dir(target.x, pos.x)
+		y := dir(target.y, pos.y)
+		next := Pos {
+			x = pos.x + x,
+			y = pos.y + y,
+		}
+		t^[target] = next
+		points^[next] = true
+	}
+}
+
+dir :: proc(target: i32, source: i32) -> i32 {
+	diff := target - source
+
+	if diff == 0 {
+		return 0
+	}
+	if diff > 0 {
+		return 1
+	}
+	return -1
+}
+
+make_targets :: proc(points: Points) -> Targets {
+	t := make(Targets)
+
+	for pos in points {
+		t[pos] = Pos {
+			x = pos.x + 50,
+			y = pos.y,
+		}
+	}
+	return t
 }
 
 cells_to_frame :: proc(cells: Cells, frame: ^[]rune, width: i32) {
@@ -56,9 +118,6 @@ cells_to_frame :: proc(cells: Cells, frame: ^[]rune, width: i32) {
 }
 
 points_to_cells :: proc(points: map[Pos]bool, cells: ^Cells, offset: OffsetMap) {
-	for p in cells {
-		delete_key(cells, p)
-	}
 	for pos in points {
 		sub_pos := Pos {
 			x = pos.x % 2,
@@ -78,6 +137,16 @@ points_to_cells :: proc(points: map[Pos]bool, cells: ^Cells, offset: OffsetMap) 
 		bits := braille_to_byte(r)
 		bits |= b
 		cells^[screen_pos] = Base + rune(bits)
+	}
+}
+clear_cells :: proc(cells: ^Cells) {
+	for p in cells {
+		delete_key(cells, p)
+	}
+}
+clear_points :: proc(points: ^Points) {
+	for p in points {
+		delete_key(points, p)
 	}
 }
 
@@ -119,7 +188,10 @@ cells_to_points :: proc(cells: Cells, bitmap: Bitmap, points: ^map[Pos]bool) {
 	}
 }
 
-render :: proc(frame: []rune, dm: Dimensions) {
+render :: proc(frame: []rune, dm: Dimensions, first_frame: bool) {
+	if !first_frame {
+		fmt.printf("\033[%dA", dm.height)
+	}
 	builder: strings.Builder
 	defer delete(builder.buf)
 
@@ -169,4 +241,12 @@ read_file_by_lines :: proc(filepath: string, l: ^Logger) -> (Cells, Dimensions) 
 		}
 	}
 	return cells, dm
+}
+
+set_cursor :: proc(show: bool) {
+	if show {
+		fmt.print("\x1b[?25h")
+		return
+	}
+	fmt.print("\x1b[?25l")
 }
