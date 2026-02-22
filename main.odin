@@ -2,7 +2,6 @@ package main
 
 import "core:fmt"
 import "core:os"
-import "core:strings"
 import "core:time"
 
 Pos :: struct {
@@ -32,8 +31,9 @@ main :: proc() {
 	l := log_init(true)
 	defer log_close(&l)
 
-	cells, screen_dm := read_file_by_lines("logo.txt", &l)
-	screen_dm.width = term_dm.width
+	x_offset: i32 = 0
+	cells, screen_dm, prefix := read_file_by_lines("logo.txt", &l, x_offset)
+	screen_dm.width = term_dm.width - x_offset
 	size := screen_dm.width * screen_dm.height
 
 	frame := make([]rune, size)
@@ -51,12 +51,10 @@ main :: proc() {
 	cells_to_points(cells, bitmap, &points)
 	targets := rain(points)
 
-	points_to_cells(points, &cells, braille)
-	cells_to_frame(cells, &frame, screen_dm)
-	render(frame, screen_dm, true)
-
 	c := 0
 	interval := time.Second / time.Duration(FPS)
+
+	render_prefix(prefix)
 
 	for c < 100 {
 		defer c += 1
@@ -68,7 +66,7 @@ main :: proc() {
 		points_to_cells(points, &cells, braille)
 		cells_to_frame(cells, &frame, screen_dm)
 
-		render(frame, screen_dm, false)
+		render(frame, screen_dm, x_offset)
 		time.sleep(interval)
 	}
 }
@@ -169,62 +167,6 @@ cells_to_points :: proc(cells: Cells, bitmap: Bitmap, points: ^map[Pos]bool) {
 			points^[p] = true
 		}
 	}
-}
-
-render :: proc(frame: []rune, dm: Dimensions, first_frame: bool) {
-	if !first_frame {
-		fmt.printf("\033[%dA", dm.height)
-	}
-	builder: strings.Builder
-	defer delete(builder.buf)
-
-	for y: i32 = 0; y < dm.height; y += 1 {
-		for x: i32 = 0; x < dm.width; x += 1 {
-			size := i32(len(frame))
-			i := frame_idx(Pos{x = x, y = y}, dm.width, size)
-			strings.write_rune(&builder, frame[i])
-		}
-		strings.write_rune(&builder, '\n')
-	}
-	fmt.print(strings.to_string(builder))
-}
-
-read_file_by_lines :: proc(filepath: string, l: ^Logger) -> (Cells, Dimensions) {
-	data, ok := os.read_entire_file(filepath, context.allocator)
-	if !ok {
-		fmt.panicf("Failed to read file: %s", filepath)
-	}
-	cells := make(Cells)
-
-	dm := Dimensions{}
-	row: i32 = 0
-
-	it := string(data)
-	for line in strings.split_lines_iterator(&it) {
-		defer row += 1
-		dm.height += 1
-
-		w: i32 = 0
-		col: i32 = 0
-
-		for r in line {
-			if !is_braille(r) && r != ' ' && r != Base {
-				msg(l, fmt.tprintf("Non-braille/space rune: %#v (U+%04X)\n", r, r))
-				continue
-			}
-			w += 1
-			if is_braille(r) {
-				pos := Pos {
-					x = col,
-					y = row,
-				}
-				cells[pos] = r
-			}
-			if w > dm.width {dm.width = w}
-			col += 1
-		}
-	}
-	return cells, dm
 }
 
 set_cursor :: proc(show: bool) {
