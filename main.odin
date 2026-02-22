@@ -5,7 +5,6 @@ import "core:os"
 import "core:strings"
 import "core:time"
 
-
 Pos :: struct {
 	x: i32,
 	y: i32,
@@ -14,6 +13,7 @@ Dimensions :: struct {
 	width:  i32,
 	height: i32,
 }
+
 Cells :: map[Pos]rune
 Targets :: map[Pos]Pos
 Points :: map[Pos]bool
@@ -21,7 +21,7 @@ Points :: map[Pos]bool
 Base: rune = '\U00002800'
 Full: rune = '\U000028FF'
 
-FPS: i64 = 60
+FPS: i64 = 120
 
 main :: proc() {
 	term_dm, ok := dimensions()
@@ -49,16 +49,16 @@ main :: proc() {
 	points := make(Points)
 
 	cells_to_points(cells, bitmap, &points)
-	targets := make_targets(points)
+	targets := rain(points)
 
 	points_to_cells(points, &cells, braille)
-	cells_to_frame(cells, &frame, screen_dm.width)
+	cells_to_frame(cells, &frame, screen_dm)
 	render(frame, screen_dm, true)
 
 	c := 0
 	interval := time.Second / time.Duration(FPS)
 
-	for c < 40 {
+	for c < 100 {
 		defer c += 1
 		clear_cells(&cells)
 		clear_points(&points)
@@ -66,23 +66,10 @@ main :: proc() {
 
 		move(&targets, &points)
 		points_to_cells(points, &cells, braille)
-		cells_to_frame(cells, &frame, screen_dm.width)
+		cells_to_frame(cells, &frame, screen_dm)
 
 		render(frame, screen_dm, false)
 		time.sleep(interval)
-	}
-}
-
-move :: proc(t: ^Targets, points: ^Points) {
-	for target, pos in t {
-		x := dir(target.x, pos.x)
-		y := dir(target.y, pos.y)
-		next := Pos {
-			x = pos.x + x,
-			y = pos.y + y,
-		}
-		t^[target] = next
-		points^[next] = true
 	}
 }
 
@@ -98,21 +85,17 @@ dir :: proc(target: i32, source: i32) -> i32 {
 	return -1
 }
 
-make_targets :: proc(points: Points) -> Targets {
-	t := make(Targets)
-
-	for pos in points {
-		t[pos] = Pos {
-			x = pos.x + 50,
-			y = pos.y,
-		}
-	}
-	return t
+out_of_bounds :: proc(pos: Pos, width, height: i32) -> bool {
+	if pos.x < 0 || pos.y < 0 {return true}
+	if pos.x >= width || pos.y >= height {return true}
+	return false
 }
 
-cells_to_frame :: proc(cells: Cells, frame: ^[]rune, width: i32) {
+cells_to_frame :: proc(cells: Cells, frame: ^[]rune, screen_dm: Dimensions) {
 	for pos, ascii in cells {
-		idx := frame_idx(pos, width)
+		if out_of_bounds(pos, screen_dm.width, screen_dm.height) {continue}
+		size := i32(len(frame))
+		idx := frame_idx(pos, screen_dm.width, size)
 		frame^[idx] = ascii
 	}
 }
@@ -150,7 +133,7 @@ clear_points :: proc(points: ^Points) {
 	}
 }
 
-frame_idx :: proc(cell: Pos, width: i32) -> i32 {
+frame_idx :: proc(cell: Pos, width: i32, size: i32) -> i32 {
 	return cell.y * width + cell.x
 }
 
@@ -197,7 +180,8 @@ render :: proc(frame: []rune, dm: Dimensions, first_frame: bool) {
 
 	for y: i32 = 0; y < dm.height; y += 1 {
 		for x: i32 = 0; x < dm.width; x += 1 {
-			i := frame_idx(Pos{x = x, y = y}, dm.width)
+			size := i32(len(frame))
+			i := frame_idx(Pos{x = x, y = y}, dm.width, size)
 			strings.write_rune(&builder, frame[i])
 		}
 		strings.write_rune(&builder, '\n')
