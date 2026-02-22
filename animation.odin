@@ -10,29 +10,45 @@ Coin :: enum {
 }
 Prefix :: [dynamic]string
 
-move :: proc(t: ^Targets, points: ^Points) {
+move :: proc(t: ^Targets, points: ^Points, arrived: ^map[Pos]bool) {
 	for target, pos in t {
+		if arrived[target] {
+			points^[target] = Status.Resting
+			continue
+		}
 		x := dir(target.x, pos.x)
 		y := dir(target.y, pos.y)
+
 		next := Pos {
 			x = pos.x + x,
 			y = pos.y + y,
 		}
+		if target == next {
+			points^[next] = Status.Resting
+			arrived^[next] = true
+			continue
+		}
+		points^[next] = Status.Seeking
 		t^[target] = next
-		points^[next] = true
 	}
 }
 
-rain :: proc(points: Points) -> Targets {
-	t := make(Targets)
-
+rain :: proc(points: Points, targets: ^Targets) {
 	for pos in points {
-		t[pos] = Pos {
+		targets^[pos] = Pos {
 			x = pos.x,
 			y = pos.y + rnd_y_offset(100),
 		}
 	}
-	return t
+}
+
+shoot_in :: proc(points: Points, targets: ^Targets) {
+	for pos in points {
+		targets^[pos] = Pos {
+			x = pos.x + 100 + rnd_x_offset(5),
+			y = pos.y + rnd_y_offset(3),
+		}
+	}
 }
 
 rnd_y_offset :: proc(range: i32) -> i32 {

@@ -12,10 +12,14 @@ Dimensions :: struct {
 	width:  i32,
 	height: i32,
 }
+Status :: enum {
+	Seeking,
+	Resting,
+}
 
 Cells :: map[Pos]rune
 Targets :: map[Pos]Pos
-Points :: map[Pos]bool
+Points :: map[Pos]Status
 
 Base: rune = '\U00002800'
 Full: rune = '\U000028FF'
@@ -31,11 +35,11 @@ main :: proc() {
 	l := log_init(true)
 	defer log_close(&l)
 
-	x_offset: i32 = 0
+	x_offset: i32 = 20
 	cells, screen_dm, prefix := read_file_by_lines("logo.txt", &l, x_offset)
+
 	screen_dm.width = term_dm.width - x_offset
 	size := screen_dm.width * screen_dm.height
-
 	frame := make([]rune, size)
 
 	set_cursor(false)
@@ -47,22 +51,22 @@ main :: proc() {
 	}
 	bitmap, braille := get_bitmap()
 	points := make(Points)
+	targets := make(Targets)
+	arrived := make(map[Pos]bool)
 
 	cells_to_points(cells, bitmap, &points)
-	targets := rain(points)
+	// shoot_in(points, &targets)
+	rain(points, &targets)
 
-	c := 0
 	interval := time.Second / time.Duration(FPS)
-
 	render_prefix(prefix)
 
-	for c < 100 {
-		defer c += 1
+	for len(targets) > len(arrived) {
 		clear_cells(&cells)
 		clear_points(&points)
 		fill(&frame)
 
-		move(&targets, &points)
+		move(&targets, &points, &arrived)
 		points_to_cells(points, &cells, braille)
 		cells_to_frame(cells, &frame, screen_dm)
 
@@ -98,7 +102,7 @@ cells_to_frame :: proc(cells: Cells, frame: ^[]rune, screen_dm: Dimensions) {
 	}
 }
 
-points_to_cells :: proc(points: map[Pos]bool, cells: ^Cells, offset: OffsetMap) {
+points_to_cells :: proc(points: Points, cells: ^Cells, offset: OffsetMap) {
 	for pos in points {
 		sub_pos := Pos {
 			x = pos.x % 2,
@@ -126,7 +130,7 @@ clear_cells :: proc(cells: ^Cells) {
 	}
 }
 clear_points :: proc(points: ^Points) {
-	for p in points {
+	for p, status in points {
 		delete_key(points, p)
 	}
 }
@@ -147,7 +151,7 @@ braille_to_byte :: proc(r: rune) -> byte {
 is_braille :: proc(r: rune) -> bool {
 	return r > Base && r <= Full
 }
-cells_to_points :: proc(cells: Cells, bitmap: Bitmap, points: ^map[Pos]bool) {
+cells_to_points :: proc(cells: Cells, bitmap: Bitmap, points: ^Points) {
 	for pos, value in cells {
 		b := braille_to_byte(value)
 
@@ -164,7 +168,7 @@ cells_to_points :: proc(cells: Cells, bitmap: Bitmap, points: ^map[Pos]bool) {
 				x = (pos.x * 2) + point.x,
 				y = (pos.y * 4) + point.y,
 			}
-			points^[p] = true
+			points^[p] = Status.Seeking
 		}
 	}
 }
