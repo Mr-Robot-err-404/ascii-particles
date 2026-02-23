@@ -1,5 +1,7 @@
 package main
 
+import "base:intrinsics"
+import "core:c/libc"
 import "core:fmt"
 import "core:os"
 import "core:time"
@@ -20,13 +22,27 @@ Status :: enum {
 Cells :: map[Pos]rune
 Targets :: map[Pos]Pos
 Points :: map[Pos]Status
+Amplitudes :: map[Pos]f16
 
 Base: rune = '\U00002800'
 Full: rune = '\U000028FF'
 
-FPS: i64 = 120
+FPS: i64 = 60
+
+stop: libc.sig_atomic_t
+
+sigint_handler :: proc "c" (sig: libc.int) {
+	prev := intrinsics.atomic_add(&stop, 1)
+
+	if prev > 0 {
+		os.exit(int(sig))
+	}
+}
 
 main :: proc() {
+	libc.signal(libc.SIGINT, sigint_handler)
+	libc.signal(libc.SIGTERM, sigint_handler)
+
 	term_dm, ok := dimensions()
 	if !ok {
 		fmt.eprintln("Failed to get terminal size")
@@ -50,23 +66,34 @@ main :: proc() {
 		height = screen_dm.height * 4,
 	}
 	bitmap, braille := get_bitmap()
+
 	points := make(Points)
 	targets := make(Targets)
+	amps := make(Amplitudes)
+	phases := make(Phases)
 	arrived := make(map[Pos]bool)
 
-	cells_to_points(cells, bitmap, &points)
-	// shoot_in(points, &targets)
-	rain(points, &targets)
-
 	interval := time.Second / time.Duration(FPS)
-	render_prefix(prefix)
+	n: u64 = 0
+	threshold: i32 = 5
+	freq: f16 = 0.08
+	amplitude: f16 = 2
 
-	for len(targets) > len(arrived) {
+	cells_to_points(cells, bitmap, &points)
+	swoop(points, &targets, dm.height / 2, &phases, amplitude)
+	// rain(points, &targets)
+
+	fill_amps(&amps, targets, amplitude)
+
+	render_prefix(prefix)
+	for len(targets) > len(arrived) && intrinsics.atomic_load(&stop) == 0 {
+		n += 1
 		clear_cells(&cells)
 		clear_points(&points)
 		fill(&frame)
 
-		move(&targets, &points, &arrived)
+		// move(&targets, &points, &arrived)
+		wave_motion(&targets, &points, &arrived, amps, threshold, freq, n, phases)
 		points_to_cells(points, &cells, braille)
 		cells_to_frame(cells, &frame, screen_dm)
 
@@ -77,13 +104,8 @@ main :: proc() {
 
 dir :: proc(target: i32, source: i32) -> i32 {
 	diff := target - source
-
-	if diff == 0 {
-		return 0
-	}
-	if diff > 0 {
-		return 1
-	}
+	if diff == 0 {return 0}
+	if diff > 0 {return 1}
 	return -1
 }
 
@@ -142,6 +164,12 @@ frame_idx :: proc(cell: Pos, width: i32, size: i32) -> i32 {
 fill :: proc(frame: ^[]rune) {
 	for i in 0 ..< len(frame) {
 		frame^[i] = ' '
+	}
+}
+
+fill_amps :: proc(amps: ^Amplitudes, targets: Targets, value: f16) {
+	for t, pos in targets {
+		amps^[t] = value
 	}
 }
 

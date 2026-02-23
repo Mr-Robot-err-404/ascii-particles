@@ -1,6 +1,7 @@
 package main
 
 import "core:fmt"
+import "core:math"
 import "core:math/rand"
 import "core:strings"
 
@@ -9,6 +10,7 @@ Coin :: enum {
 	Tails,
 }
 Prefix :: [dynamic]string
+Phases :: map[Pos]f16
 
 move :: proc(t: ^Targets, points: ^Points, arrived: ^map[Pos]bool) {
 	for target, pos in t {
@@ -16,13 +18,8 @@ move :: proc(t: ^Targets, points: ^Points, arrived: ^map[Pos]bool) {
 			points^[target] = Status.Resting
 			continue
 		}
-		x := dir(target.x, pos.x)
-		y := dir(target.y, pos.y)
+		next := walk(target, pos)
 
-		next := Pos {
-			x = pos.x + x,
-			y = pos.y + y,
-		}
 		if target == next {
 			points^[next] = Status.Resting
 			arrived^[next] = true
@@ -31,6 +28,96 @@ move :: proc(t: ^Targets, points: ^Points, arrived: ^map[Pos]bool) {
 		points^[next] = Status.Seeking
 		t^[target] = next
 	}
+}
+
+walk :: proc(target: Pos, pos: Pos) -> Pos {
+	dx := dir(target.x, pos.x)
+	dy := dir(target.y, pos.y)
+
+	next := Pos {
+		x = pos.x + dx,
+		y = pos.y + dy,
+	}
+	return next
+}
+
+wave_motion :: proc(
+	t: ^Targets,
+	points: ^Points,
+	arrived: ^map[Pos]bool,
+	amplitudes: Amplitudes,
+	threshold: i32,
+	frequency: f16,
+	n: u64,
+	phases: Phases,
+) {
+	for target, pos in t {
+		if arrived[target] {
+			points^[target] = Status.Resting
+			continue
+		}
+		amp, ok := amplitudes[target]
+		if !ok {continue}
+
+		next := wave_step(target, pos, amp, frequency, n, threshold, phases)
+		if target == next {
+			points^[next] = Status.Resting
+			arrived^[next] = true
+			continue
+		}
+		points^[next] = Status.Seeking
+		t^[target] = next
+	}
+}
+
+wave_step :: proc(
+	target: Pos,
+	pos: Pos,
+	amp: f16,
+	frequency: f16,
+	frame: u64,
+	threshold: i32,
+	phases: Phases,
+) -> Pos {
+	if within_threshold(target, pos, threshold) {
+		return walk(target, pos)
+	}
+	return oscillate(pos, target, amp, frequency, frame, phases)
+}
+
+within_threshold :: proc(target: Pos, pos: Pos, threshold: i32) -> bool {
+	x := math.abs(target.x - pos.x)
+	return x < threshold
+}
+
+calc_distance :: proc(target: Pos, pos: Pos) -> (f16, f16, f16) {
+	dx := f16(target.x - pos.x)
+	dy := f16(target.y - pos.y)
+	return math.sqrt(dx * dx + dy * dy), dx, dy
+}
+
+oscillate :: proc(
+	pos: Pos,
+	target: Pos,
+	amplitude: f16,
+	frequency: f16,
+	frame: u64,
+	phases: Phases,
+) -> Pos {
+	distance, dx, dy := calc_distance(target, pos)
+	norm_x := dx / distance
+	norm_y := dy / distance
+
+	next_x := f16(pos.x) + norm_x
+	next_y := f16(pos.y) + norm_y
+
+	perp_x := norm_y * -1
+	perp_y := norm_x
+
+	disp_x := math.sin(frequency * f16(frame) + phases[target]) * amplitude * perp_x
+	disp_y := math.sin(frequency * f16(frame) + phases[target]) * amplitude * perp_y
+
+	return Pos{x = i32(next_x + disp_x), y = i32(next_y + disp_y)}
 }
 
 rain :: proc(points: Points, targets: ^Targets) {
@@ -42,12 +129,29 @@ rain :: proc(points: Points, targets: ^Targets) {
 	}
 }
 
-shoot_in :: proc(points: Points, targets: ^Targets) {
-	for pos in points {
-		targets^[pos] = Pos {
-			x = pos.x + 100 + rnd_x_offset(5),
-			y = pos.y + rnd_y_offset(3),
+swoop :: proc(
+	points: Points,
+	targets: ^Targets,
+	y_midpoint: i32,
+	phases: ^Phases,
+	amplitude: f16,
+) {
+
+	for t in points {
+		offset := rnd_y_offset(5)
+		y := y_midpoint - i32(amplitude) + offset
+		phase: f16 = 0
+
+		if coin_flip() == Coin.Heads {
+			y = y_midpoint + i32(amplitude) + offset
+			phase = math.PI
 		}
+		start := Pos {
+			x = t.x + 100 + rnd_x_offset(5),
+			y = y,
+		}
+		phases^[t] = phase
+		targets^[t] = start
 	}
 }
 
